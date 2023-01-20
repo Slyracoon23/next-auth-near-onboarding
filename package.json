@@ -18,6 +18,7 @@
     "Lluis Agusti <hi@llu.lu>"
   ],
   "dependencies": {
+    "near-api-js": "^1.1.0",
     "next": "latest",
     "next-auth": "latest",
     "nodemailer": "^6",

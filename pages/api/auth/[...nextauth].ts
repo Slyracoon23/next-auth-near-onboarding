@@ -1,65 +1,138 @@
-import NextAuth, { NextAuthOptions } from "next-auth"
-import GoogleProvider from "next-auth/providers/google"
-import FacebookProvider from "next-auth/providers/facebook"
-import GithubProvider from "next-auth/providers/github"
-import TwitterProvider from "next-auth/providers/twitter"
-import Auth0Provider from "next-auth/providers/auth0"
-// import AppleProvider from "next-auth/providers/apple"
-// import EmailProvider from "next-auth/providers/email"
+import NextAuth from "next-auth";
+import CredentialsProvider from "next-auth/providers/credentials";
+import GoogleProvider from "next-auth/providers/google";
+import { getCsrfToken } from "next-auth/react";
+import { connect, KeyPair, keyStores, utils } from "near-api-js";
+
+const myKeyStore = new keyStores.InMemoryKeyStore();
+
+const contractName = "dev-1616611682822-1712761";
+
+const config = {
+  myKeyStore,
+  networkId: "testnet",
+  nodeUrl: "https://rpc.testnet.near.org",
+  GAS: "200000000000000",
+  DEFAULT_NEW_ACCOUNT_AMOUNT: "5",
+  GUESTS_ACCOUNT_SECRET:
+    "7UVfzoKZL4WZGF98C3Ue7tmmA6QamHCiB1Wd5pkxVPAc7j6jf3HXz5Y9cR93Y68BfGDtMLQ9Q29Njw5ZtzGhPxv",
+  contractMethods: {
+    changeMethods: [
+      "new",
+      "nft_mint",
+      "nft_transfer",
+      "add_guest",
+      "remove_guest",
+      "nft_approve_account_id",
+      "nft_mint_guest",
+      "nft_add_sale_guest",
+      "nft_remove_sale_guest",
+      "upgrade_guest",
+    ],
+    viewMethods: ["get_guest", "get_token_ids", "nft_token", "get_sale"],
+  },
+  marketDeposit: "100000000000000000000000",
+  marketId: "market." + contractName,
+};
 
 // For more information on each option (and a full list of options) go to
 // https://next-auth.js.org/configuration/options
-export const authOptions: NextAuthOptions = {
-  // https://next-auth.js.org/configuration/providers/oauth
-  providers: [
-    /* EmailProvider({
-         server: process.env.EMAIL_SERVER,
-         from: process.env.EMAIL_FROM,
-       }),
-    // Temporarily removing the Apple provider from the demo site as the
-    // callback URL for it needs updating due to Vercel changing domains
-
-    Providers.Apple({
-      clientId: process.env.APPLE_ID,
-      clientSecret: {
-        appleId: process.env.APPLE_ID,
-        teamId: process.env.APPLE_TEAM_ID,
-        privateKey: process.env.APPLE_PRIVATE_KEY,
-        keyId: process.env.APPLE_KEY_ID,
+export default async function auth(req: any, res: any) {
+  const providers = [
+    CredentialsProvider({
+      name: "NEAR Refound",
+      credentials: {
+        // Take public key from message
+        public_key: {
+          label: "public key",
+          type: "text",
+          placeholder: "0x0",
+        },
+        account_id: {
+          label: "account_id",
+          type: "text",
+          placeholder: "temp.near",
+        },
       },
-    }),
-    */
-    FacebookProvider({
-      clientId: process.env.FACEBOOK_ID,
-      clientSecret: process.env.FACEBOOK_SECRET,
-    }),
-    GithubProvider({
-      clientId: process.env.GITHUB_ID,
-      clientSecret: process.env.GITHUB_SECRET,
+
+      async authorize(credentials) {
+        try {
+          const near = await connect(config);
+
+          const publicKey = credentials?.public_key || "";
+          const accountId = credentials?.account_id || "";
+
+          const contractId = accountId.substr(accountId.indexOf(".") + 1);
+
+          /// setup signer for guestAccount txs
+          const guestId = "guests." + contractId;
+          // creates a public / private key pair using the provided private key
+          const guestKeyPair = KeyPair.fromString(
+            process.env.GUESTS_ACCOUNT_SECRET
+          );
+
+          // adds the keyPair you created to keyStore
+          await myKeyStore.setKey(config.networkId, guestId, guestKeyPair);
+
+          const nextAuthUrl = new URL(process.env.NEXTAUTH_URL);
+
+          const guestsAccount = await near.account(guestId);
+
+          const addKey = await guestsAccount.addKey(
+            publicKey,
+            contractId,
+            config.contractMethods.changeMethods,
+            utils.format.parseNearAmount("0.1")
+          );
+
+          // Refound Account
+          const contractAccount = await near.account(contractName);
+          const add_guest = await contractAccount.functionCall({
+            contractId: contractId,
+            methodName: "add_guest",
+            args: {
+              new_account_id: accountId,
+              new_public_key: publicKey,
+            },
+            gas: config.GAS,
+            attachedDeposit: utils.format.parseNearAmount("0"),
+          });
+
+          return { id: guestId };
+          // return { success: true, result: { addKey, add_guest } }
+        } catch (e) {
+          return null;
+        }
+      },
     }),
     GoogleProvider({
       clientId: process.env.GOOGLE_ID,
       clientSecret: process.env.GOOGLE_SECRET,
     }),
-    TwitterProvider({
-      clientId: process.env.TWITTER_ID,
-      clientSecret: process.env.TWITTER_SECRET,
-    }),
-    Auth0Provider({
-      clientId: process.env.AUTH0_ID,
-      clientSecret: process.env.AUTH0_SECRET,
-      issuer: process.env.AUTH0_ISSUER,
-    }),
-  ],
-  theme: {
-    colorScheme: "light",
-  },
-  callbacks: {
-    async jwt({ token }) {
-      token.userRole = "admin"
-      return token
-    },
-  },
-}
+  ];
 
-export default NextAuth(authOptions)
+  const isDefaultSigninPage =
+    req.method === "GET" && req.query.nextauth.includes("signin");
+
+  // Hide Sign-In with Ethereum from default sign page
+  if (isDefaultSigninPage) {
+    providers.pop();
+  }
+
+  return await NextAuth(req, res, {
+    // https://next-auth.js.org/configuration/providers/oauth
+    providers,
+    session: {
+      strategy: "jwt",
+    },
+    secret: process.env.NEXTAUTH_SECRET,
+    callbacks: {
+      async session({ session, token }: { session: any; token: any }) {
+        session.address = token.sub;
+        session.user.name = token.sub;
+        session.user.image = "https://www.fillmurray.com/128/128";
+        return session;
+      },
+    },
+  });
+}
