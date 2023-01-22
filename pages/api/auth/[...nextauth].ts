@@ -51,19 +51,18 @@ export default async function auth(req: any, res: any) {
         account_id: {
           label: "account_id",
           type: "text",
-          placeholder: "temp.near",
+          placeholder: "bob" + "." + contractName + "." + config.networkId,
         },
       },
 
-      async authorize(credentials) {
+      async authorize(credentials, req) {
         try {
           const near = await connect(config);
 
           const publicKey = credentials?.public_key || "";
           const accountId = credentials?.account_id || "";
 
-          const contractId = accountId.substr(accountId.indexOf(".") + 1);
-
+          const contractId = contractName + "." + config.networkId;
           /// setup signer for guestAccount txs
           const guestId = "guests." + contractId;
           // creates a public / private key pair using the provided private key
@@ -74,37 +73,43 @@ export default async function auth(req: any, res: any) {
           // adds the keyPair you created to keyStore
           await myKeyStore.setKey(config.networkId, guestId, guestKeyPair);
 
-          const nextAuthUrl = new URL(process.env.NEXTAUTH_URL);
-
           const guestsAccount = await near.account(guestId);
 
-          const addKey = await guestsAccount.addKey(
-            publicKey,
-            contractId,
-            config.contractMethods.changeMethods,
-            utils.format.parseNearAmount("0.1")
-          );
+          // TODO: CREATE CONTRACT
+          // const addKey = await guestsAccount.addKey(
+          //   publicKey,
+          //   contractId,
+          //   config.contractMethods.changeMethods,
+          //   utils.format.parseNearAmount("0.1")
+          // );
 
           // Refound Account
           const contractAccount = await near.account(contractName);
-          const add_guest = await contractAccount.functionCall({
-            contractId: contractId,
-            methodName: "add_guest",
-            args: {
-              new_account_id: accountId,
-              new_public_key: publicKey,
-            },
-            gas: config.GAS,
-            attachedDeposit: utils.format.parseNearAmount("0"),
-          });
+          // TODO: CREATE CONTRACT
+          // const add_guest = await contractAccount.functionCall({
+          //   contractId: contractId,
+          //   methodName: "add_guest",
+          //   args: {
+          //     new_account_id: accountId,
+          //     new_public_key: publicKey,
+          //   },
+          //   gas: config.GAS,
+          //   attachedDeposit: utils.format.parseNearAmount("0"),
+          // });
 
           return { id: guestId };
-          // return { success: true, result: { addKey, add_guest } }
+          // return { success: true, result: { addKey, add_guest } };
+
+          // console.log(`public_key: ${publicKey}`);
+          // console.log(`account_id: ${accountId}`);
+          // return { id: "guestId" };
         } catch (e) {
+          console.log(e);
           return null;
         }
       },
     }),
+    // FIXME: THIS IS NEEDED OR ELSE THE UI IS BROKEN
     GoogleProvider({
       clientId: process.env.GOOGLE_ID,
       clientSecret: process.env.GOOGLE_SECRET,
@@ -114,7 +119,7 @@ export default async function auth(req: any, res: any) {
   const isDefaultSigninPage =
     req.method === "GET" && req.query.nextauth.includes("signin");
 
-  // Hide Sign-In with Ethereum from default sign page
+  // Hide Sign-In with Near from default sign page
   if (isDefaultSigninPage) {
     providers.pop();
   }
